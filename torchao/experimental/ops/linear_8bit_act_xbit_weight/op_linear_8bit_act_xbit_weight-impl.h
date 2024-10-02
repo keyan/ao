@@ -8,9 +8,11 @@
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
 #include <torchao/experimental/kernels/cpu/aarch64/linear/linear.h>
+#include <torchao/experimental/kernels/cpu/aarch64/kleidi/pack.h>
 #endif // defined(__aarch64__) || defined(__ARM_NEON)
 
 #include <torchao/experimental/ops/linear_8bit_act_xbit_weight/linear_8bit_act_xbit_weight.h>
+#include <torchao/experimental/kernels/cpu/aarch64/kleidi/kai_matmul_clamp_f32_qai8dxp_qsi4c32p.h>
 #include <optional>
 #include <vector>
 
@@ -41,6 +43,27 @@ get_ukernel_config() {
   torchao::ops::linear_8bit_act_xbit_weight::UKernelConfig config;
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
+
+  // Try to use Kleidi kernels if available and supported
+#if defined (TORCHAO_ENABLE_KLEIDI)
+  if constexpr (weight_nbit == 4 && !has_weight_zeros && !has_bias) {
+
+    namespace kernel = torchao::kernels::cpu::aarch64::kleidi::kai_matmul_clamp_f32_qai8dxp_qsi4c32p8::neon_dotprod_1x4x32;
+
+    config.mr = kernel::get_ukernel().get_mr();
+    config.nr = kernel::get_ukernel().get_nr();
+    config.activation_data_size_fn = &kernel::activation_data_size;
+    config.activation_data_alignment = kernel::get_alignement();
+    config.prepare_activation_data_fn = &kernel::prepare_activation_data;
+    config.weight_data_size_fn = &kernel::weight_data_size;
+    config.weight_data_alignment = kernel::get_alignement();
+    config.prepare_weight_data_fn = &kernel::prepare_weight_data;
+
+    return config;
+  }
+#endif // TORCHAO_ENABLE_KLEIDI
+
+  // Fallback to native kernels
   namespace ukernel = torchao::kernels::cpu::aarch64::linear::
       channelwise_8bit_activation_groupwise_lowbit_weight_1x8x16_f32_neondot;
   config.mr = 1;
