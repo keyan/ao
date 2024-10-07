@@ -165,6 +165,23 @@ def _(func, types, args, kwargs):
         func, args, kwargs, args[0]._apply_fn_to_data(torch.t)
     )
 
+@implements(aten.slice.Tensor)
+def _(func, types, args, kwargs):
+    self, dim, start, end, step = fill_defaults(args, 5, [0, None, None, 1])
+    assert step == 1
+    assert dim == 0 or dim == 1, f"Only dim==0 or 1 are supported, got: {dim}"
+    if end >= self.shape[dim]:
+        end = self.shape[dim]
+    shape = list(self.shape)
+    shape[dim] = end - start
+    block_size = self.block_size
+    assert len(block_size) == 2, f"Slice only works for 2d block_size right now, got: {block_size}"
+    # with slice, some shape dimension might be smaller than block_size dimension, so
+    # we need to make sure there is no overflow
+    block_size = (min(shape[0], block_size[0]), min(shape[1], block_size[1]))
+    new = self.__class__(aten.slice.Tensor(self.layout_tensor, dim, start, end, step), block_size, shape, self.quant_min, self.quant_max, self.zero_point_domain, dtype=self.dtype, strides=self.stride())
+    return return_and_correct_aliasing(func, args, kwargs, new)
+
 to_linear_activation_quantized = LinearActivationQuantizedTensor.from_float
 
 if TORCH_VERSION_AT_LEAST_2_5:
